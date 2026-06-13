@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excel Deep-Agent — описание проекта</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --card:#ffffff; --ink:#1c2333; --muted:#5b6478;
+    --accent:#3b5bdb; --accent2:#0ca678; --warn:#e8590c; --line:#e3e6ef;
+    --code:#f1f3f9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 64px}
+  header{margin-bottom:28px}
+  h1{font-size:1.9rem;margin:0 0 6px}
+  .sub{color:var(--muted);font-size:1.02rem;max-width:760px}
+  .badges{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 14px;font-size:.85rem;color:var(--muted)}
+  .badge b{color:var(--accent)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 28px;margin-bottom:22px;box-shadow:0 1px 3px rgba(28,35,51,.05)}
+  h2{font-size:1.25rem;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  h2 .n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;font-size:.95rem;flex:none}
+  p{margin:.5em 0}
+  code{background:var(--code);border-radius:5px;padding:1px 6px;font-family:Consolas,'Cascadia Code',monospace;font-size:.9em}
+  pre{background:#222840;color:#e6e9f5;border-radius:10px;padding:14px 18px;overflow-x:auto;font-size:.88rem;line-height:1.55}
+  pre code{background:none;padding:0;color:inherit}
+  table{width:100%;border-collapse:collapse;font-size:.92rem;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:var(--code);font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin-top:10px}
+  .tile{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fbfcff}
+  .tile h3{margin:0 0 6px;font-size:1rem;color:var(--accent)}
+  .tile p{margin:0;font-size:.9rem;color:var(--muted)}
+  .note{border-left:4px solid var(--warn);background:#fff4ec;border-radius:0 10px 10px 0;padding:12px 16px;font-size:.92rem;margin-top:14px}
+  .diagram{overflow-x:auto;margin-top:8px}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:10px;font-size:.85rem;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:14px;height:14px;border-radius:4px;display:inline-block;flex:none}
+  footer{color:var(--muted);font-size:.85rem;text-align:center;margin-top:30px}
+  @media (max-width:640px){section{padding:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Excel Deep-Agent</h1>
+  <div class="sub">Агент-ассистент консультанта по данным: deep-агент на открытом харнессе
+  <b>DeepAgents</b> (LangChain), заточенный под обработку Excel-файлов — со своим скиллом,
+  субагентом-чистильщиком и мини-бенчем с детерминированной проверкой.</div>
+  <div class="badges">
+    <span class="badge">Харнесс: <b>DeepAgents 0.6</b></span>
+    <span class="badge">Модель: <b>Qwen / GLM через OpenRouter</b></span>
+    <span class="badge">Python <b>3.11+</b></span>
+    <span class="badge">Бенч: <b>8 задач · 3 профиля</b></span>
+    <span class="badge">Лицензия скилла: <b>MIT</b></span>
+  </div>
+</header>
+
+<section>
+  <h2><span class="n">1</span>Идея</h2>
+  <p>Технические фичи к агентским харнессам сегодня собираются «из готовых кирпичиков» за часы —
+  ценность в привязке к реальной работе. Этот проект приземляет персонального агента на конкретную
+  специфику: <b>консалтинг по данным и бесконечные эксельки</b> — чистка битых столбцов, дедупликация,
+  объединение списков, своды по регионам, аккуратное сохранение форматирования.</p>
+  <p>Основные функции: <b>1)</b> стандартная работа с файлом — формулы, столбцы, цвета и шрифты, содержимое и вид ячеек; <b>2)</b> анализ данных через pandas (включая текстовые столбцы); <b>3)</b> причесывание данных — типы, битые ячейки и ошибки, пункты/подпункты, выравнивание по размерам; <b>4)</b> графики внутренними средствами Excel (нативные диаграммы openpyxl.chart); <b>5)</b> построчная LLM-обработка ячеек — например, тональность каждого отзыва (тул <code>llm_process_column</code>).</p>
+  <p>Ключевой принцип: агент <b>не загружает таблицы в контекст LLM</b>. Он работает программно —
+  pandas/openpyxl через shell: разведка через <code>head()</code>, точечные скрипты, проверка результата кодом.</p>
+</section>
+
+<section>
+  <h2><span class="n">2</span>Архитектура</h2>
+  <div class="diagram">
+  <svg viewBox="0 0 960 640" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif" width="100%">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#8a93ab"/>
+      </marker>
+      <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/>
+      </marker>
+    </defs>
+
+    <!-- Пользователь / CLI / Бенч -->
+    <rect x="30" y="22" width="180" height="58" rx="10" fill="#eef1fb" stroke="#3b5bdb" stroke-width="1.5"/>
+    <text x="120" y="46" text-anchor="middle" font-size="14" font-weight="600" fill="#1c2333">Пользователь</text>
+    <text x="120" y="65" text-anchor="middle" font-size="11" fill="#5b6478">задача / чат</text>
+
+    <rect x="270" y="22" width="190" height="58" rx="10" fill="#eef1fb" stroke="#3b5bdb" stroke-width="1.5"/>
+    <text x="365" y="46" text-anchor="middle" font-size="14" font-weight="600" fill="#1c2333">CLI · main.py</text>
+    <text x="365" y="65" text-anchor="middle" font-size="11" fill="#5b6478">--profile · --workdir · --fresh</text>
+
+    <rect x="520" y="22" width="220" height="58" rx="10" fill="#fff4ec" stroke="#e8590c" stroke-width="1.5"/>
+    <text x="630" y="46" text-anchor="middle" font-size="14" font-weight="600" fill="#1c2333">Бенч · run_bench.py</text>
+    <text x="630" y="65" text-anchor="middle" font-size="11" fill="#5b6478">8 задач × 3 профиля → results.md</text>
+
+    <line x1="210" y1="51" x2="266" y2="51" stroke="#8a93ab" stroke-width="1.6" marker-end="url(#arr)"/>
+    <line x1="365" y1="80" x2="365" y2="128" stroke="#3b5bdb" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="600" y1="80" x2="480" y2="130" stroke="#e8590c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+
+    <!-- Deep Agent -->
+    <rect x="110" y="132" width="520" height="210" rx="14" fill="#f5f7ff" stroke="#3b5bdb" stroke-width="2"/>
+    <text x="370" y="158" text-anchor="middle" font-size="15" font-weight="700" fill="#3b5bdb">DEEP AGENT (create_deep_agent)</text>
+    <text x="370" y="176" text-anchor="middle" font-size="11" fill="#5b6478">профили: baseline · skill · skill_subagent</text>
+
+    <rect x="130" y="190" width="225" height="62" rx="8" fill="#ffffff" stroke="#c3cae0"/>
+    <text x="242" y="211" text-anchor="middle" font-size="12" font-weight="600" fill="#1c2333">Системный промпт</text>
+    <text x="242" y="228" text-anchor="middle" font-size="10.5" fill="#5b6478">программная работа с таблицами,</text>
+    <text x="242" y="242" text-anchor="middle" font-size="10.5" fill="#5b6478">бэкапы, абсолютные пути, самопроверка</text>
+
+    <rect x="375" y="190" width="235" height="62" rx="8" fill="#ffffff" stroke="#c3cae0"/>
+    <text x="492" y="211" text-anchor="middle" font-size="12" font-weight="600" fill="#1c2333">Middleware</text>
+    <text x="492" y="228" text-anchor="middle" font-size="10.5" fill="#5b6478">TodoList · Skills · Filesystem</text>
+    <text x="492" y="242" text-anchor="middle" font-size="10.5" fill="#5b6478">· SubAgents · Summarization</text>
+
+    <rect x="130" y="264" width="225" height="62" rx="8" fill="#e9faf3" stroke="#0ca678"/>
+    <text x="242" y="285" text-anchor="middle" font-size="12" font-weight="600" fill="#0b7a58">Скилл: skills/excel/SKILL.md</text>
+    <text x="242" y="302" text-anchor="middle" font-size="10.5" fill="#3e7a65">прогрессивное раскрытие: имя+описание</text>
+    <text x="242" y="316" text-anchor="middle" font-size="10.5" fill="#3e7a65">в промпте, тело читается при надобности</text>
+
+    <rect x="375" y="264" width="235" height="62" rx="8" fill="#ffffff" stroke="#c3cae0"/>
+    <text x="492" y="285" text-anchor="middle" font-size="12" font-weight="600" fill="#1c2333">Тулы</text>
+    <text x="492" y="302" text-anchor="middle" font-size="10.5" fill="#5b6478">inspect_excel · backup_file · llm_process_column</text>
+    <text x="492" y="316" text-anchor="middle" font-size="10.5" fill="#5b6478">execute · ls · read/write/edit_file · grep</text>
+
+    <!-- LLM -->
+    <rect x="710" y="150" width="220" height="96" rx="12" fill="#eef1fb" stroke="#3b5bdb" stroke-width="1.5"/>
+    <text x="820" y="178" text-anchor="middle" font-size="14" font-weight="600" fill="#1c2333">LLM · OpenRouter</text>
+    <text x="820" y="198" text-anchor="middle" font-size="11.5" fill="#5b6478">qwen/qwen3-coder · z-ai/glm-4.6</text>
+    <text x="820" y="216" text-anchor="middle" font-size="11" fill="#5b6478">открытые модели —</text>
+    <text x="820" y="231" text-anchor="middle" font-size="11" fill="#5b6478">имитация закрытого контура</text>
+    <line x1="630" y1="198" x2="706" y2="198" stroke="#3b5bdb" stroke-width="2" marker-end="url(#arrA)" marker-start="url(#arrA)"/>
+
+    <!-- Субагент -->
+    <rect x="710" y="290" width="220" height="118" rx="12" fill="#e9faf3" stroke="#0ca678" stroke-width="1.8"/>
+    <text x="820" y="316" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0b7a58">Субагент data-cleaner</text>
+    <text x="820" y="336" text-anchor="middle" font-size="11" fill="#3e7a65">чистый контекст · свой промпт</text>
+    <text x="820" y="352" text-anchor="middle" font-size="11" fill="#3e7a65">построчная чистка битых столбцов</text>
+    <text x="820" y="368" text-anchor="middle" font-size="11" fill="#3e7a65">openpyxl поверх книги (не to_excel)</text>
+    <text x="820" y="384" text-anchor="middle" font-size="11" fill="#3e7a65">отчёт: строки · проблемы · контр. сумма</text>
+    <line x1="630" y1="320" x2="706" y2="330" stroke="#0ca678" stroke-width="1.8" marker-end="url(#arr)"/>
+    <text x="668" y="312" text-anchor="middle" font-size="10" fill="#0b7a58">task()</text>
+
+    <!-- Рабочая папка -->
+    <rect x="110" y="400" width="520" height="120" rx="14" fill="#fffbe8" stroke="#d9a400" stroke-width="1.8"/>
+    <text x="370" y="428" text-anchor="middle" font-size="14" font-weight="700" fill="#8a6a00">Рабочая папка (LocalShellBackend, root_dir)</text>
+    <text x="370" y="452" text-anchor="middle" font-size="12" fill="#6e5a10">sales_2025.xlsx · clients.xlsx · attendance_q1/q2.xlsx</text>
+    <text x="370" y="472" text-anchor="middle" font-size="12" fill="#6e5a10">*.bak (бэкапы) · attendance_all.xlsx · временные скрипты</text>
+    <text x="370" y="498" text-anchor="middle" font-size="10.5" fill="#9a8430">virtual_mode=False → реальные абсолютные пути (без песочницы)</text>
+    <line x1="370" y1="342" x2="370" y2="396" stroke="#8a93ab" stroke-width="1.8" marker-end="url(#arr)" marker-start="url(#arr)"/>
+    <text x="395" y="372" font-size="10" fill="#5b6478">pandas / openpyxl / shell</text>
+    <path d="M 820 408 L 820 440 L 634 460" fill="none" stroke="#0ca678" stroke-width="1.6" marker-end="url(#arr)"/>
+
+    <!-- Валидаторы -->
+    <rect x="690" y="470" width="240" height="96" rx="12" fill="#fff4ec" stroke="#e8590c" stroke-width="1.6"/>
+    <text x="810" y="497" text-anchor="middle" font-size="13" font-weight="600" fill="#1c2333">Валидаторы (bench/validators.py)</text>
+    <text x="810" y="517" text-anchor="middle" font-size="11" fill="#5b6478">детерминированная проверка файлов:</text>
+    <text x="810" y="533" text-anchor="middle" font-size="11" fill="#5b6478">строки · суммы · форматирование</text>
+    <text x="810" y="552" text-anchor="middle" font-size="11" font-weight="600" fill="#e8590c">PASS / FAIL → results.md</text>
+    <line x1="634" y1="500" x2="686" y2="505" stroke="#e8590c" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+
+    <!-- Данные -->
+    <rect x="110" y="552" width="520" height="60" rx="12" fill="#f1f3f9" stroke="#aab2c8" stroke-width="1.4"/>
+    <text x="370" y="577" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1c2333">data/source — эталонные «грязные» данные (generate_demo_data.py)</text>
+    <text x="370" y="596" text-anchor="middle" font-size="10.5" fill="#5b6478">копируются в рабочую папку перед каждым запуском задачи (--fresh / раннер бенча)</text>
+    <line x1="370" y1="548" x2="370" y2="524" stroke="#aab2c8" stroke-width="1.6" marker-end="url(#arr)"/>
+  </svg>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:#eef1fb;border:1.5px solid #3b5bdb"></span>харнесс и LLM</span>
+    <span><span class="sw" style="background:#e9faf3;border:1.5px solid #0ca678"></span>скилл и субагент</span>
+    <span><span class="sw" style="background:#fffbe8;border:1.5px solid #d9a400"></span>файлы и рабочая папка</span>
+    <span><span class="sw" style="background:#fff4ec;border:1.5px solid #e8590c"></span>бенч и проверка</span>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">3</span>Компоненты</h2>
+  <div class="grid">
+    <div class="tile"><h3>Агент · agent.py</h3>
+      <p>Сборка через <code>create_deep_agent</code>: системный промпт с правилами работы с таблицами,
+      LocalShellBackend (файловые тулы + shell), скилл и субагент по профилю.</p></div>
+    <div class="tile"><h3>Кастомные тулы · tools.py</h3>
+      <p><code>inspect_excel</code> — разведка файла вместо чтения целиком; <code>backup_file</code> — копия <code>.bak</code>; <code>llm_process_column</code> — построчная LLM-обработка текстового столбца пакетами в цикле.</p></div>
+    <div class="tile"><h3>Excel-скилл · SKILL.md</h3>
+      <p>Собственная переработка идеи скиллов Anthropic (MIT): рецепты чистки битых чисел,
+      сохранение заливки и ширины столбцов, дедуп, своды, самопроверка результата.</p></div>
+    <div class="tile"><h3>Субагент data-cleaner</h3>
+      <p>Изолированный контекст и узкий промпт: цикл по строкам, учёт нераспознанных ячеек,
+      запись через openpyxl поверх существующей книги.</p></div>
+    <div class="tile"><h3>Мини-бенч · bench/</h3>
+      <p>8 задач (<code>tasks.json</code>) + детерминированные валидаторы. Раннер гоняет профили,
+      пишет таблицу: PASS/FAIL, токены, время, наличие бэкапа.</p></div>
+    <div class="tile"><h3>Демо-данные · data/</h3>
+      <p>Кейс консалтинга: продажи с выручкой в форматах «1 234,50 руб.» и дублями,
+      два списка посещаемости, клиенты с пропусками сегментов.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="n">4</span>Три профиля — что сравниваем</h2>
+  <table>
+    <tr><th>Профиль</th><th>Скилл</th><th>Субагент</th><th>Гипотеза</th></tr>
+    <tr><td><code>baseline</code></td><td>—</td><td>—</td><td>голый харнесс: что модель умеет «из коробки»</td></tr>
+    <tr><td><code>skill</code></td><td>✔</td><td>—</td><td>доменные рецепты поднимают качество (формат, бэкапы)</td></tr>
+    <tr><td><code>skill_subagent</code></td><td>✔</td><td>✔</td><td>изоляция грязной чистки экономит контекст и ошибки</td></tr>
+  </table>
+  <p style="margin-top:10px">Методика защиты — «предложите 2–3 решения, померьте, защищайте лучшее»:
+  процент решённых задач, суммарные токены, время — всё в <code>bench/results/results.md</code>.</p>
+</section>
+
+<section>
+  <h2><span class="n">5</span>Задачи бенча</h2>
+  <table>
+    <tr><th>ID</th><th>Задача</th><th>Что проверяет валидатор</th></tr>
+    <tr><td><code>T01_dedup</code></td><td>удалить дубли строк продаж</td><td>60 уникальных строк, состав совпадает с эталоном</td></tr>
+    <tr><td><code>T02_clean_revenue</code></td><td>распознать «битый» столбец выручки</td><td>каждое значение = Часы × Ставка, строки не потеряны</td></tr>
+    <tr><td><code>T03_region_summary</code></td><td>свод выручки по регионам на новый лист</td><td>суммы по 5 регионам сходятся, исходный лист цел</td></tr>
+    <tr><td><code>T04_merge_attendance</code></td><td>объединить два списка посещаемости</td><td>12 человек, без дублей по ФИО</td></tr>
+    <tr><td><code>T05_fill_segment</code></td><td>заполнить пропуски сегментов по правилу</td><td>правило выполнено, существующие значения не тронуты</td></tr>
+    <tr><td><code>T06_rename_keep_format</code></td><td>переименовать заголовок столбца</td><td>текст новый, заливка/шрифт/ширина столбцов сохранены</td></tr>
+    <tr><td><code>T07_native_chart</code></td><td>свод по регионам + столбчатая диаграмма средствами Excel</td><td>нативный объект диаграммы на листе «Свод», свод сходится</td></tr>
+    <tr><td><code>T08_review_sentiment</code></td><td>тональность каждого отзыва (построчная LLM-обработка)</td><td>точность ≥ 90% против эталонной разметки 20 отзывов</td></tr>
+  </table>
+  <p style="margin-top:10px">Корректность валидаторов подтверждена «золотыми решениями»
+  (8/8 PASS) и нетронутыми данными (8/8 FAIL).</p>
+</section>
+
+<section>
+  <h2><span class="n">6</span>Запуск</h2>
+<pre><code># установка (Python 3.11+)
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env        # вписать OPENROUTER_API_KEY
+
+# одна задача со свежими демо-данными
+python main.py --fresh --workdir runs/demo "Очисти столбец 'Выручка (грязная)' в sales_2025.xlsx"
+
+# интерактивный чат / другой профиль
+python main.py --workdir runs/demo
+python main.py --profile baseline --workdir runs/demo "..."
+
+# полный бенч: 3 профиля × 6 задач
+python bench/run_bench.py</code></pre>
+  <div class="note"><b>Безопасность.</b> <code>LocalShellBackend</code> выполняет команды агента на вашей
+  машине без песочницы (<code>virtual_mode=False</code>). Запускайте на доверенных данных; для «боевого»
+  режима заверните запуск в Docker — как делают настоящие бенчи.</div>
+</section>
+
+<footer>Excel Deep-Agent · учебный проект по мотивам консультации · DeepAgents + OpenRouter · 2026</footer>
+</div>
+</body>
+</html>

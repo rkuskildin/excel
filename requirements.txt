@@ -1,0 +1,5 @@
+deepagents>=0.6,<0.7
+langchain-openai>=0.3
+python-dotenv>=1.0
+pandas>=2.0
+openpyxl>=3.1

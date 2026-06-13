@@ -1,0 +1,22 @@
+# secrets / local config
+.env
+*.key
+*password*
+tls/
+web_password.txt
+
+# agent run artifacts & backups
+runs/
+*.bak
+*.xlsx.bak
+bench/results/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os
+.DS_Store
+._*
