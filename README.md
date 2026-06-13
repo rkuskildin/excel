@@ -24,9 +24,10 @@ Excel-файлов, с собственным скиллом, субагенто
   shell, todo-планирование. Таблицы — только программно, не в контекст.
 - **Кастомные тулы** (`src/excel_agent/tools.py`) — `inspect_excel` (разведка),
   `backup_file` (бэкап `.bak`), `llm_process_column` (построчная LLM-обработка).
-- **Excel-скилл** (`skills/excel/SKILL.md`, MIT) — собственная переработка идеи скиллов
-  Anthropic: формулы и стили, сохранение форматирования, чистка битых чисел, нативные
-  графики, рецепты причесывания данных.
+- **Excel-скилл** (`skills/excel/SKILL.md`, MIT) — оригинальный скилл по общеотраслевым
+  стандартам: формулы вместо хардкода, ноль формульных ошибок, сохранение форматирования,
+  чистка битых чисел, нативные графики, финмодельные цветовые/числовые конвенции,
+  пересчёт формул через headless-LibreOffice. (Не содержит текста чужих лицензированных скиллов.)
 - **Субагент `data-cleaner`** — чистый контекст, построчная чистка грязных столбцов.
 - **Три профиля** для сравнения: `baseline` / `skill` / `skill_subagent`.
 - **Мини-бенч** (`bench/`) — 8 задач с детерминированной проверкой.
@@ -40,14 +41,38 @@ Excel-файлов, с собственным скиллом, субагенто
 ```bash
 cd excel_agent
 python -m venv .venv
-.venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env          # и впишите OPENROUTER_API_KEY
+cp .env.example .env             # и впишите доступ к модели (см. ниже)
 ```
 
-Модель по умолчанию — `qwen/qwen3-coder` через OpenRouter (открытая модель — имитация
-закрытого контура; можно `z-ai/glm-4.6` и др.). Для построчной обработки ячеек можно
-задать отдельную дешёвую модель: `MAP_MODEL_NAME` в `.env`.
+### Выбор модели (любой OpenAI-совместимый провайдер)
+
+Провайдер задаётся через `.env` тремя переменными — менять код не нужно:
+
+```ini
+OPENAI_BASE_URL=...    # адрес API
+API_KEY=...            # ключ
+MODEL_NAME=...         # имя модели
+TEMPERATURE=0
+MAX_RETRIES=8          # авто-повтор при 429 (важно для бесплатных тарифов)
+```
+
+Готовые наборы:
+
+| Провайдер | `OPENAI_BASE_URL` | `MODEL_NAME` | Где взять ключ |
+|---|---|---|---|
+| OpenRouter (по умолч.) | `https://openrouter.ai/api/v1` | `qwen/qwen3-coder` | openrouter.ai |
+| Google Gemini (free) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.5-flash` | aistudio.google.com |
+| Groq (free) | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | console.groq.com |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` | platform.deepseek.com |
+
+Совместимость: для обратной совместимости понимаются и `OPENROUTER_API_KEY`/`OPENAI_API_KEY`.
+Для построчной обработки ячеек можно задать отдельную дешёвую модель — `MAP_MODEL_NAME`.
+
+> ⚠️ Бесплатные тарифы жёстко лимитируют запросы (Gemini free — порядка 20/сутки на модель).
+> Для надёжного прохождения бенча используйте платный ключ. `MAX_RETRIES` сглаживает
+> кратковременные лимиты, но не дневной потолок.
 
 ## Запуск
 
@@ -62,6 +87,37 @@ python main.py --workdir runs/demo "Определи тональность ка
 python main.py --workdir runs/demo
 python main.py --profile baseline --workdir runs/demo "..."
 ```
+
+## Docker
+
+Рекомендуемый способ «боевого» запуска (агент изолирован от хоста; в образе есть
+LibreOffice для пересчёта формул):
+
+```bash
+docker build -t excel-agent .
+docker run --rm --env-file .env -v "$PWD/runs:/app/runs" excel-agent \
+  --fresh --workdir runs/demo "Очисти столбец 'Выручка (грязная)' в sales_2025.xlsx и добавь столбец 'Выручка'"
+```
+
+Том `runs/` пробрасывается на хост — результаты `.xlsx` остаются после завершения контейнера.
+
+## Веб-интерфейс
+
+`webapp.py` — лёгкая морда (FastAPI) поверх агента: загрузка `.xlsx`, постановка задачи,
+скачивание результата. Защита — HTTP Basic Auth; при указании сертификата работает по HTTPS.
+
+```bash
+docker run -d --name excel-web --env-file .env \
+  -e WEB_USER=admin -e WEB_PASSWORD='ваш-пароль' -e WEB_PORT=8600 \
+  -e WEB_SSL_CERT=/tls/cert.pem -e WEB_SSL_KEY=/tls/key.pem \
+  -v "$PWD/runs:/app/runs" -v "$PWD/tls:/tls:ro" \
+  -p 8600:8600 --entrypoint python excel-agent webapp.py
+# затем: https://<host>:8600  (логин/пароль из WEB_USER/WEB_PASSWORD)
+```
+
+Переменные: `WEB_USER`, `WEB_PASSWORD` (обязателен), `WEB_PORT` (8600), `WEB_PROFILE`
+(`skill`), `WEB_SSL_CERT`/`WEB_SSL_KEY` (без них — обычный HTTP). Самоподписанный сертификат:
+`openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout tls/key.pem -out tls/cert.pem -subj "/CN=localhost"`.
 
 ## Бенч
 
@@ -92,16 +148,23 @@ python bench/run_bench.py --profiles baseline skill --tasks T01_dedup T07_native
 ```
 excel_agent/
 ├── main.py                  # CLI: задача или чат
+├── webapp.py                # веб-интерфейс (FastAPI, Basic Auth, TLS)
+├── Dockerfile               # образ с LibreOffice для пересчёта формул
 ├── project_overview.html    # описание проекта со схемой архитектуры
-├── src/excel_agent/         # config, tools, agent
+├── src/excel_agent/         # config (сменный провайдер), tools, agent
 ├── skills/excel/SKILL.md    # Excel-скилл (MIT)
 ├── data/                    # generate_demo_data.py + source/*.xlsx
 ├── bench/                   # tasks.json, validators.py, run_bench.py
-└── runs/                    # рабочие папки запусков (создаются сами)
+└── runs/                    # рабочие папки запусков (создаются сами, в .gitignore)
 ```
 
 ## Безопасность
 
-`LocalShellBackend` выполняет команды агента на вашей машине без песочницы
+`LocalShellBackend` выполняет команды агента на машине без песочницы
 (`virtual_mode=False`, агент видит реальные пути). Запускайте на доверенных данных;
-для «боевого» режима оберните в Docker — как делают настоящие бенчи.
+для «боевого» режима используйте **Docker** (раздел выше) — агент изолирован в контейнере.
+
+Веб-интерфейс закрыт паролем (Basic Auth) и поддерживает TLS. По открытому HTTP пароль
+передаётся в base64 без шифрования — для публичного доступа используйте HTTPS
+(`WEB_SSL_CERT`/`WEB_SSL_KEY`) или обратный прокси. Секреты (`.env`, `tls/`, пароли)
+исключены из репозитория через `.gitignore`.
