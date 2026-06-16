@@ -47,7 +47,9 @@ os.environ.setdefault("EXTRA_SKILLS_DIR", str(SKILLS_UP))
 if not PASSWORD:
     raise SystemExit("WEB_PASSWORD не задан — откажусь стартовать без пароля.")
 
-app = FastAPI()
+# Отключаем авто-доки FastAPI (/docs, /redoc, /openapi.json) — они не под паролем и
+# раскрывают схему API. Внутреннему инструменту они не нужны.
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 security = HTTPBasic()
 run_lock = threading.Lock()  # агент не любит параллельные запуски (rate limit + общий workdir)
 
