@@ -44,6 +44,25 @@ RECURSION_LIMIT = int(os.getenv("RECURSION_LIMIT", "80"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "8"))
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
 
+# --- GigaChat (Sber) ---
+# У GigaChat свой OAuth (credentials -> токен на ~30 мин), но API OpenAI-совместимый,
+# поэтому подключаем как ChatOpenAI с base_url GigaChat и токеном вместо ключа.
+GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS", "").strip()
+GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat-2-Max")
+GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
+def _gigachat_chat(model_name: str | None = None):
+    # Родной клиент: сам делает OAuth (credentials -> токен) и форматирует tools под GigaChat.
+    from langchain_gigachat.chat_models import GigaChat
+
+    return GigaChat(
+        credentials=GIGACHAT_CREDENTIALS,
+        scope=GIGACHAT_SCOPE,
+        model=model_name or GIGACHAT_MODEL,
+        verify_ssl_certs=False,   # у Sber собственный CA
+        temperature=TEMPERATURE,
+        timeout=REQUEST_TIMEOUT,
+    )
+
 
 # Fallback-цепочка: при ошибке основного провайдера (например, 429/исчерпана квота)
 # запрос автоматически уходит к следующему. Задаётся в .env как JSON-список:
@@ -91,24 +110,38 @@ def provider_specs() -> list[dict]:
     return _provider_specs()
 
 
+# Упорядоченный список фабрик моделей: основной + фолбэки. Поддерживает GigaChat
+# (через OAuth) и любые OpenAI-совместимые провайдеры. Каждый элемент — (kind, builder).
+def _builders() -> list[tuple]:
+    builders: list[tuple] = []
+    if GIGACHAT_CREDENTIALS:
+        builders.append(("gigachat", _gigachat_chat))
+    for spec in _provider_specs():
+        if spec["api_key"]:  # OpenAI-совместимый провайдер только если задан ключ
+            builders.append(("openai", (lambda s: lambda mn=None: _chat(s, mn))(spec)))
+    if not builders:
+        raise RuntimeError(
+            "Не задан ни GigaChat (GIGACHAT_CREDENTIALS), ни OpenAI-ключ (API_KEY) в .env.")
+    return builders
+
+
 def n_providers() -> int:
     """Сколько провайдеров доступно (основной + фолбэки)."""
-    return len(_provider_specs())
+    return len(_builders())
 
 
 # Прозрачный with_fallbacks несовместим с deepagents.resolve_model (он ждёт BaseChatModel
-# или строку), поэтому fallback реализован как РОТАЦИЯ на уровне задачи (см. agent.run_with_fallback):
-# make_model(index) отдаёт обычный ChatOpenAI выбранного провайдера.
+# или строку), поэтому fallback реализован как РОТАЦИЯ на уровне задачи (agent.run_with_fallback).
 def make_model(index: int = 0):
     """Модель агента от провайдера №index (0 — основной)."""
-    specs = _provider_specs()
-    return _chat(specs[index % len(specs)])
+    builders = _builders()
+    return builders[index % len(builders)][1]()
 
 
 def make_map_model(index: int = 0):
     """Модель для построчной обработки ячеек (дешёвая map-модель — на выбранном провайдере)."""
-    specs = _provider_specs()
-    spec = specs[index % len(specs)]
-    # MAP_MODEL_NAME переопределяет модель только для основного провайдера
-    override = MAP_MODEL_NAME if (index == 0 and MAP_MODEL_NAME != MODEL_NAME) else None
-    return _chat(spec, override)
+    builders = _builders()
+    kind, builder = builders[index % len(builders)]
+    if index == 0 and kind == "openai" and MAP_MODEL_NAME != MODEL_NAME:
+        return builder(MAP_MODEL_NAME)
+    return builder()
