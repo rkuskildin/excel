@@ -435,7 +435,7 @@ async function run(){const task=document.getElementById('task').value.trim();
     const reader=r.body.getReader(),dec=new TextDecoder();let buf='',final=null;
     while(true){const {value,done}=await reader.read();if(done)break;
       buf+=dec.decode(value,{stream:true});let nl;
-      while((nl=buf.indexOf('\n'))>=0){const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+      while((nl=buf.indexOf(String.fromCharCode(10)))>=0){const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
         if(!line)continue;let ev;try{ev=JSON.parse(line)}catch(e){continue}
         if(ev.kind==='final'){final=ev}
         else if(ev.kind==='error'){addStep('error',ev.text)}
