@@ -27,6 +27,11 @@ from excel_agent.config import DATA_SOURCE, MODEL_NAME  # noqa: E402
 
 PROFILES = ["baseline", "skill", "skill_subagent"]
 
+# Сколько раз повторять задачу при rate-limit (429)
+MAX_BENCH_RETRIES = 5
+# Сколько секунд ждать между попытками
+RETRY_WAIT_SECONDS = 65
+
 
 def run_one(profile: str, task: dict, runs_dir: Path) -> dict:
     workdir = runs_dir / profile / task["id"]
@@ -39,17 +44,50 @@ def run_one(profile: str, task: dict, runs_dir: Path) -> dict:
     rec = {"profile": profile, "task": task["id"], "passed": False,
            "tokens": 0, "seconds": 0.0, "backup_made": False, "note": ""}
     t0 = time.time()
-    try:
-        agent = build_agent(profile, workdir)
-        res = run_task(agent, task["prompt"])
-        rec["tokens"] = res["tokens"]
-        ok, msg = VALIDATORS[task["id"]](workdir)
-        rec["passed"], rec["note"] = ok, msg
-    except Exception as e:  # noqa: BLE001
-        rec["note"] = f"ошибка запуска: {e}"
-        traceback.print_exc()
+
+    # --- ИЗМЕНЕНИЕ 1: retry-цикл при rate-limit ---
+    for attempt in range(MAX_BENCH_RETRIES):
+        try:
+            agent = build_agent(profile, workdir)
+            res = run_task(agent, task["prompt"])
+            rec["tokens"] = res["tokens"]
+
+            # --- ИЗМЕНЕНИЕ 2: логируем ответ агента для диагностики ---
+            answer = res.get("answer", "")
+            if answer:
+                print(f"    [агент]: {answer[:200]}", flush=True)
+
+            ok, msg = VALIDATORS[task["id"]](workdir)
+            rec["passed"], rec["note"] = ok, msg
+            break  # успех — выходим из retry-цикла
+
+        except Exception as e:
+            err_str = str(e)
+
+            # --- ИЗМЕНЕНИЕ 3: отдельная обработка rate-limit (429) ---
+            if "429" in err_str or "rate" in err_str.lower() or "quota" in err_str.lower():
+                if attempt < MAX_BENCH_RETRIES - 1:
+                    print(
+                        f"    ⏳ rate-limit (попытка {attempt + 1}/{MAX_BENCH_RETRIES}), "
+                        f"жду {RETRY_WAIT_SECONDS}с...",
+                        flush=True,
+                    )
+                    time.sleep(RETRY_WAIT_SECONDS)
+                    continue  # следующая попытка
+                else:
+                    rec["note"] = f"rate-limit после {MAX_BENCH_RETRIES} попыток: {e}"
+            else:
+                rec["note"] = f"ошибка запуска: {e}"
+                traceback.print_exc()
+                break  # не rate-limit — повторять смысла нет
+
     rec["seconds"] = round(time.time() - t0, 1)
     rec["backup_made"] = any(workdir.glob("*.bak"))
+
+    # --- ИЗМЕНЕНИЕ 4: предупреждение если агент не создал бэкап ---
+    if not rec["backup_made"] and rec["passed"]:
+        print("    ⚠️  задача прошла, но бэкап .bak не создан", flush=True)
+
     return rec
 
 
