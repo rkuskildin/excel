@@ -129,8 +129,13 @@ docker run -d --name excel-web --env-file .env \
 ```
 
 Переменные: `WEB_USER`, `WEB_PASSWORD` (обязателен), `WEB_PORT` (8600), `WEB_PROFILE`
-(`skill`), `WEB_SSL_CERT`/`WEB_SSL_KEY` (без них — обычный HTTP). Самоподписанный сертификат:
+(`skill`), `WEB_SSL_CERT`/`WEB_SSL_KEY` (без них — обычный HTTP), `EXTRA_SKILLS_DIR`
+(папка для пользовательских скиллов). Самоподписанный сертификат:
 `openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout tls/key.pem -out tls/cert.pem -subj "/CN=localhost"`.
+
+Возможности морды: drag-&-drop загрузка `.xlsx`, **live-стриминг шагов агента** (вызовы
+инструментов/мысли/результаты в реальном времени, NDJSON-поток `/api/run_stream`),
+**загрузка своих скиллов** (`SKILL.md` с валидацией YAML-заголовка), скачивание результата.
 
 ## Бенч
 

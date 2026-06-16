@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from deepagents import create_deep_agent
@@ -123,6 +124,76 @@ def run_task(agent, task: str) -> dict:
         answer = "(агент завершил без текстового ответа — проверьте файл и .bak в рабочей папке)"
 
     return {"answer": answer, "tokens": tokens, "steps": len(messages)}
+
+
+def _content_text(content) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [b.get("text", "") if isinstance(b, dict) else str(b) for b in content]
+        return " ".join(p for p in parts if p).strip()
+    return ""
+
+
+def _step_events(msg) -> list[dict]:
+    """Превращает сообщение агента в человекочитаемые шаги для live-стрима."""
+    evs: list[dict] = []
+    for tc in (getattr(msg, "tool_calls", None) or []):
+        try:
+            preview = json.dumps(tc.get("args", {}), ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            preview = str(tc.get("args", {}))
+        evs.append({"kind": "tool", "text": f"{tc.get('name', 'инструмент')} {preview[:180]}"})
+    cls = type(msg).__name__
+    if cls == "ToolMessage":
+        evs.append({"kind": "result",
+                    "text": (_content_text(getattr(msg, "content", ""))[:220] or "(пусто)")})
+    elif not getattr(msg, "tool_calls", None):
+        txt = _content_text(getattr(msg, "content", ""))
+        if txt:
+            evs.append({"kind": "thought", "text": txt[:300]})
+    return evs
+
+
+def stream_run(profile: str, workdir: str | Path, task: str):
+    """Генератор событий выполнения (live-стрим). Yields dict: kind in
+    {tool, result, thought, info, error, final}. Поддерживает fallback-ротацию."""
+    inp = {"messages": [{"role": "user", "content": task}]}
+    cfg = {"recursion_limit": RECURSION_LIMIT}
+    total = n_providers()
+    for idx in range(total):
+        all_msgs: list = []
+        try:
+            agent = build_agent(profile, workdir, provider_index=idx)
+            if idx > 0:
+                yield {"kind": "info", "text": f"провайдер #{idx}"}
+            for update in agent.stream(inp, config=cfg, stream_mode="updates"):
+                if not isinstance(update, dict):
+                    continue
+                for val in update.values():
+                    msgs = (val or {}).get("messages", []) if isinstance(val, dict) else []
+                    for m in msgs:
+                        all_msgs.append(m)
+                        for ev in _step_events(m):
+                            yield ev
+            tokens = sum((getattr(m, "usage_metadata", None) or {}).get("total_tokens", 0)
+                         for m in all_msgs)
+            answer = ""
+            for m in reversed(all_msgs):
+                t = _content_text(getattr(m, "content", ""))
+                if t:
+                    answer = t
+                    break
+            yield {"kind": "final",
+                   "answer": answer or "(агент завершил без текстового ответа — проверьте файл и .bak)",
+                   "tokens": tokens, "steps": len(all_msgs)}
+            return
+        except Exception as e:  # noqa: BLE001
+            if is_rate_limit(e) and idx < total - 1:
+                yield {"kind": "info", "text": "лимит провайдера → переключаюсь на резервного"}
+                continue
+            yield {"kind": "error", "text": f"{type(e).__name__}: {e}"[:400]}
+            return
 
 
 def is_rate_limit(err: Exception) -> bool:

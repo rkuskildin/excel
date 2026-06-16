@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -25,7 +26,8 @@ import uvicorn
 import yaml
 from fastapi import (Depends, FastAPI, File, Form, HTTPException, UploadFile,
                      status)
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               StreamingResponse)
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -176,6 +178,36 @@ def run(_: bool = Depends(auth), task: str = Form(...),
         run_lock.release()
 
 
+@app.post("/api/run_stream")
+def run_stream(_: bool = Depends(auth), task: str = Form(...),
+               profile: str = Form(DEFAULT_PROFILE)):
+    if not task.strip():
+        raise HTTPException(400, "пустая задача")
+    if profile not in ("baseline", "skill", "skill_subagent"):
+        profile = DEFAULT_PROFILE
+    if not run_lock.acquire(blocking=False):
+        raise HTTPException(409, "агент уже выполняет задачу — подождите")
+    files_now = list_xlsx()
+    if files_now:
+        task = ("Файлы .xlsx в рабочей папке: "
+                + ", ".join(f"'{f['name']}'" for f in files_now)
+                + ". Если в задаче файл не назван явно и он один — работай с ним.\n\n") + task
+
+    def gen():
+        try:
+            from excel_agent.agent import stream_run
+            for ev in stream_run(profile, WORKDIR, task):
+                if ev.get("kind") == "final":
+                    ev["files"] = list_xlsx()
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+        except Exception as e:  # noqa: BLE001
+            yield json.dumps({"kind": "error", "text": f"{type(e).__name__}: {e}"[:400]}) + "\n"
+        finally:
+            run_lock.release()
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
 HTML = """<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -244,6 +276,15 @@ HTML = """<!DOCTYPE html>
   #out{display:none}
   .answer{white-space:pre-wrap;line-height:1.6;background:rgba(8,12,24,.55);border:1px solid var(--line);
     border-left:3px solid var(--acc2);border-radius:12px;padding:14px 16px}
+  .log{display:none;flex-direction:column;gap:6px;max-height:340px;overflow:auto;margin-bottom:14px;
+    background:rgba(8,12,24,.5);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .logline{display:flex;gap:9px;font-size:.88rem;line-height:1.45;padding:3px 2px;animation:fade .25s ease}
+  .logline .li{flex-shrink:0}
+  .logline .tx{color:var(--text);white-space:pre-wrap;word-break:break-word}
+  .logline.tool .tx{color:#8fd0ff} .logline.result .tx{color:var(--muted)}
+  .logline.thought .tx{color:#d7e0ff} .logline.info .tx{color:#ffd27d}
+  .logline.error .tx{color:var(--danger)}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
   .badges{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .badge{font-size:.8rem;color:var(--muted);background:rgba(255,255,255,.04);border:1px solid var(--line);
     border-radius:999px;padding:5px 11px}
@@ -312,6 +353,7 @@ HTML = """<!DOCTYPE html>
 
   <div class="card" id="out">
     <div class="step"><span class="num">✓</span> Результат</div>
+    <div id="log" class="log"></div>
     <div id="answer"></div>
     <div class="badges" id="badges"></div>
   </div>
@@ -373,23 +415,41 @@ dropsk.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)sendSk
 document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');profile=b.dataset.v});
+function addStep(kind,text){const log=document.getElementById('log');
+  const ic={tool:'🔧',result:'📄',thought:'💭',info:'➡️',error:'⚠️'}[kind]||'•';
+  const d=document.createElement('div');d.className='logline '+kind;
+  d.innerHTML='<span class="li">'+ic+'</span><span class="tx">'+esc(text)+'</span>';
+  log.appendChild(d);log.scrollTop=log.scrollHeight}
 async function run(){const task=document.getElementById('task').value.trim();
   if(!task){toast('Впиши задачу',true);return}
   const go=document.getElementById('go');go.disabled=true;go.classList.add('busy');
   document.getElementById('gotext').textContent='Агент работает…';
-  document.getElementById('status').textContent='может занять минуту-другую';
-  const out=document.getElementById('out');out.style.display='block';
-  document.getElementById('answer').innerHTML='<div class="answer">⏳ агент думает…</div>';
-  document.getElementById('badges').innerHTML='';
+  document.getElementById('status').textContent='шаги появляются вживую…';
+  document.getElementById('out').style.display='block';
+  const log=document.getElementById('log');log.style.display='flex';log.innerHTML='';
+  document.getElementById('answer').innerHTML='';document.getElementById('badges').innerHTML='';
   const fd=new FormData();fd.append('task',task);fd.append('profile',profile);
-  try{const d=await j('api/run',{method:'POST',body:fd});
-    document.getElementById('answer').innerHTML='<div class="answer">'+esc(d.answer||'(пустой ответ)')+'</div>';
-    document.getElementById('badges').innerHTML=
-      '<span class="badge">🧩 профиль: '+profile+'</span>'+
-      '<span class="badge">🔢 токены: '+(d.tokens??'?')+'</span>'+
-      '<span class="badge">💬 сообщений: '+(d.steps??'?')+'</span>';
-    renderFiles(d.files);document.getElementById('status').textContent='готово';toast('Готово ✓');
-  }catch(e){document.getElementById('answer').innerHTML='<div class="answer err">⚠ '+esc(e.message)+'</div>';
+  try{
+    const r=await fetch('api/run_stream',{method:'POST',body:fd});
+    if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}
+    const reader=r.body.getReader(),dec=new TextDecoder();let buf='',final=null;
+    while(true){const {value,done}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});let nl;
+      while((nl=buf.indexOf('\n'))>=0){const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;let ev;try{ev=JSON.parse(line)}catch(e){continue}
+        if(ev.kind==='final'){final=ev}
+        else if(ev.kind==='error'){addStep('error',ev.text)}
+        else{addStep(ev.kind,ev.text)}
+      }}
+    if(final){
+      document.getElementById('answer').innerHTML='<div class="answer">'+esc(final.answer||'(пустой ответ)')+'</div>';
+      document.getElementById('badges').innerHTML=
+        '<span class="badge">🧩 профиль: '+profile+'</span>'+
+        '<span class="badge">🔢 токены: '+(final.tokens??'?')+'</span>'+
+        '<span class="badge">💬 шагов: '+(final.steps??'?')+'</span>';
+      renderFiles(final.files);document.getElementById('status').textContent='готово';toast('Готово ✓');
+    }else{document.getElementById('status').textContent='завершено';}
+  }catch(e){addStep('error',e.message);
     document.getElementById('status').textContent='ошибка';toast(e.message,true)}
   go.disabled=false;go.classList.remove('busy');document.getElementById('gotext').textContent='Выполнить'}
 refresh();loadSkills();
