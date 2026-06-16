@@ -104,6 +104,13 @@ def run(_: bool = Depends(auth), task: str = Form(...),
     try:
         # импорт тяжёлый — внутри, чтобы старт сервера был быстрым
         from excel_agent.agent import run_with_fallback
+        # подсказываем агенту, какие файлы лежат в рабочей папке (иначе переспрашивает имя)
+        files_now = list_xlsx()
+        if files_now:
+            hint = ("Файлы .xlsx в рабочей папке: "
+                    + ", ".join(f"'{f['name']}'" for f in files_now)
+                    + ". Если в задаче файл не назван явно и он один — работай с ним.\n\n")
+            task = hint + task
         res = run_with_fallback(profile, WORKDIR, task)
         return JSONResponse({"answer": res.get("answer", ""),
                              "tokens": res.get("tokens"),

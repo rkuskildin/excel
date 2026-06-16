@@ -102,11 +102,27 @@ def run_task(agent, task: str) -> dict:
         usage = getattr(m, "usage_metadata", None)
         if usage:
             tokens += usage.get("total_tokens", 0)
-    return {
-        "answer": messages[-1].content if messages else "",
-        "tokens": tokens,
-        "steps": len(messages),
-    }
+
+    # Финальное сообщение модели иногда пустое (агент закончил на вызове инструмента) —
+    # берём последний НЕПУСТОЙ текстовый ответ, а не слепо messages[-1].
+    def _text(content) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):  # Gemini может вернуть список блоков
+            parts = [b.get("text", "") if isinstance(b, dict) else str(b) for b in content]
+            return " ".join(p for p in parts if p).strip()
+        return ""
+
+    answer = ""
+    for m in reversed(messages):
+        txt = _text(getattr(m, "content", ""))
+        if txt:
+            answer = txt
+            break
+    if not answer:
+        answer = "(агент завершил без текстового ответа — проверьте файл и .bak в рабочей папке)"
+
+    return {"answer": answer, "tokens": tokens, "steps": len(messages)}
 
 
 def is_rate_limit(err: Exception) -> bool:
