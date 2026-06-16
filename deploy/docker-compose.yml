@@ -1,0 +1,33 @@
+# Деплой Excel-агента (веб-морда) в Docker.
+# Запуск из этой папки (deploy/):
+#   cp .env.example .env            # вписать WEB_PASSWORD (и при желании порт/профиль)
+#   cp ../.env.example ../.env      # вписать доступ к модели (OPENAI_BASE_URL / API_KEY / MODEL_NAME)
+#   ./gen-cert.sh <host-или-ip>     # самоподписанный TLS (или положи свой в ./tls/{cert,key}.pem)
+#   docker compose up -d --build
+# Морда: https://<host>:<WEB_PORT>  (логин/пароль из WEB_USER/WEB_PASSWORD)
+
+services:
+  excel-web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: excel-agent:latest
+    container_name: excel-web
+    restart: unless-stopped
+    entrypoint: ["python", "webapp.py"]
+    env_file:
+      - ../.env                     # провайдер модели: OPENAI_BASE_URL / API_KEY / MODEL_NAME / MODEL_FALLBACKS
+    environment:
+      WEB_USER: "${WEB_USER:-admin}"
+      WEB_PASSWORD: "${WEB_PASSWORD:?Задай WEB_PASSWORD в deploy/.env}"
+      WEB_PORT: "${WEB_PORT:-8600}"
+      WEB_PROFILE: "${WEB_PROFILE:-skill}"
+      WEB_WORKDIR: /app/runs/web
+      EXTRA_SKILLS_DIR: /app/runs/skills
+      WEB_SSL_CERT: /tls/cert.pem
+      WEB_SSL_KEY: /tls/key.pem
+    volumes:
+      - ./runs:/app/runs            # результаты .xlsx + загруженные скиллы (персистентно)
+      - ./tls:/tls:ro               # TLS-сертификат (если нет — морда поднимется по HTTP)
+    ports:
+      - "${WEB_PORT:-8600}:8600"

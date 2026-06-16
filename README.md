@@ -168,6 +168,7 @@ excel_agent/
 ├── main.py                  # CLI: задача или чат
 ├── webapp.py                # веб-интерфейс (FastAPI, Basic Auth, TLS)
 ├── Dockerfile               # образ с LibreOffice для пересчёта формул
+├── deploy/                  # docker-compose, gen-cert.sh, инструкция деплоя
 ├── project_overview.html    # описание проекта со схемой архитектуры
 ├── src/excel_agent/         # config (сменный провайдер), tools, agent
 ├── skills/excel/SKILL.md    # Excel-скилл (MIT)
