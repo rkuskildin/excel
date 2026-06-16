@@ -12,7 +12,7 @@ from pathlib import Path
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 
-from .config import RECURSION_LIMIT, SKILLS_DIR, make_model
+from .config import RECURSION_LIMIT, SKILLS_DIR, make_model, n_providers
 from .tools import CUSTOM_TOOLS
 
 SYSTEM_PROMPT = """Ты — агент-ассистент консультанта по данным. Твоя специализация —
@@ -61,12 +61,16 @@ CLEANER_SUBAGENT = {
 }
 
 
-def build_agent(profile: str = "skill_subagent", workdir: str | Path = "."):
-    """Создаёт агента заданного профиля, работающего в папке workdir."""
+def build_agent(profile: str = "skill_subagent", workdir: str | Path = ".",
+                provider_index: int = 0):
+    """Создаёт агента заданного профиля, работающего в папке workdir.
+
+    provider_index выбирает провайдера из цепочки (0 — основной, далее MODEL_FALLBACKS).
+    """
     if profile not in ("baseline", "skill", "skill_subagent"):
         raise ValueError(f"Неизвестный профиль: {profile}")
     workdir = Path(workdir).resolve()
-    model = make_model()
+    model = make_model(provider_index)
     # virtual_mode=False: агент работает с реальными абсолютными путями.
     # Это удобнее (см. лекцию про относительные/абсолютные пути), но НЕ даёт
     # песочницы — запускайте на доверенных данных или заверните в Docker.
@@ -103,3 +107,32 @@ def run_task(agent, task: str) -> dict:
         "tokens": tokens,
         "steps": len(messages),
     }
+
+
+def is_rate_limit(err: Exception) -> bool:
+    """Похоже ли исключение на лимит провайдера (429 / quota / rate)."""
+    s = str(err).lower()
+    return any(t in s for t in ("429", "rate limit", "ratelimit",
+                                "quota", "resource_exhausted", "too many requests"))
+
+
+def run_with_fallback(profile: str, workdir: str | Path, task: str) -> dict:
+    """Запускает задачу, при rate-limit переключаясь на следующего провайдера.
+
+    Провайдеры берутся из config (основной + MODEL_FALLBACKS). Если фолбэков нет —
+    ведёт себя как обычный build_agent + run_task.
+    """
+    total = n_providers()
+    last_err: Exception | None = None
+    for idx in range(total):
+        try:
+            return run_task(build_agent(profile, workdir, provider_index=idx), task)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if is_rate_limit(e) and idx < total - 1:
+                print(f"[fallback] провайдер #{idx} лимитирован → переключаюсь на #{idx + 1}",
+                      flush=True)
+                continue
+            raise
+    assert last_err is not None
+    raise last_err

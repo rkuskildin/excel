@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "bench"))
 
 from validators import VALIDATORS  # noqa: E402
 
-from excel_agent.agent import build_agent, run_task  # noqa: E402
+from excel_agent.agent import run_with_fallback  # noqa: E402
 from excel_agent.config import DATA_SOURCE, MODEL_NAME  # noqa: E402
 
 PROFILES = ["baseline", "skill", "skill_subagent"]
@@ -48,8 +48,8 @@ def run_one(profile: str, task: dict, runs_dir: Path) -> dict:
     # --- ИЗМЕНЕНИЕ 1: retry-цикл при rate-limit ---
     for attempt in range(MAX_BENCH_RETRIES):
         try:
-            agent = build_agent(profile, workdir)
-            res = run_task(agent, task["prompt"])
+            # ротация провайдеров при лимите (config.MODEL_FALLBACKS), затем — внешний wait-retry
+            res = run_with_fallback(profile, workdir, task["prompt"])
             rec["tokens"] = res["tokens"]
 
             # --- ИЗМЕНЕНИЕ 2: логируем ответ агента для диагностики ---

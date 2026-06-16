@@ -103,9 +103,8 @@ def run(_: bool = Depends(auth), task: str = Form(...),
         raise HTTPException(409, "агент уже выполняет задачу — подождите")
     try:
         # импорт тяжёлый — внутри, чтобы старт сервера был быстрым
-        from excel_agent.agent import build_agent, run_task
-        agent = build_agent(profile, WORKDIR)
-        res = run_task(agent, task)
+        from excel_agent.agent import run_with_fallback
+        res = run_with_fallback(profile, WORKDIR, task)
         return JSONResponse({"answer": res.get("answer", ""),
                              "tokens": res.get("tokens"),
                              "steps": res.get("steps"),
