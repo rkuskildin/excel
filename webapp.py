@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -21,6 +22,7 @@ import threading
 from pathlib import Path
 
 import uvicorn
+import yaml
 from fastapi import (Depends, FastAPI, File, Form, HTTPException, UploadFile,
                      status)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -35,6 +37,10 @@ PORT = int(os.getenv("WEB_PORT", "8600"))
 DEFAULT_PROFILE = os.getenv("WEB_PROFILE", "skill")
 WORKDIR = Path(os.getenv("WEB_WORKDIR", "runs/web")).resolve()
 WORKDIR.mkdir(parents=True, exist_ok=True)
+# Пользовательские скиллы (config.skills_dirs читает ту же переменную EXTRA_SKILLS_DIR).
+SKILLS_UP = Path(os.getenv("EXTRA_SKILLS_DIR", str(WORKDIR.parent / "skills"))).resolve()
+SKILLS_UP.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("EXTRA_SKILLS_DIR", str(SKILLS_UP))
 
 if not PASSWORD:
     raise SystemExit("WEB_PASSWORD не задан — откажусь стартовать без пароля.")
@@ -82,6 +88,53 @@ def fresh(_: bool = Depends(auth)):
 @app.get("/api/files")
 def files(_: bool = Depends(auth)):
     return {"files": list_xlsx()}
+
+
+def list_skills() -> list[dict]:
+    out = []
+    for md in sorted(SKILLS_UP.glob("*/SKILL.md")):
+        item = {"name": md.parent.name, "description": ""}
+        try:
+            meta = yaml.safe_load(md.read_text(encoding="utf-8").split("---")[1])
+            if isinstance(meta, dict):
+                item["name"] = str(meta.get("name", md.parent.name))
+                item["description"] = str(meta.get("description", ""))[:200]
+        except Exception:  # noqa: BLE001
+            item["description"] = "(не удалось прочитать заголовок)"
+        out.append(item)
+    return out
+
+
+@app.get("/api/skills")
+def skills(_: bool = Depends(auth)):
+    return {"skills": list_skills()}
+
+
+@app.post("/api/skill")
+def upload_skill(_: bool = Depends(auth), file: UploadFile = File(...)):
+    raw = file.file.read().decode("utf-8", "replace")
+    parts = raw.split("---")
+    if len(parts) < 3:
+        raise HTTPException(400, "Нет YAML-заголовка (--- … ---) в начале SKILL.md")
+    try:
+        meta = yaml.safe_load(parts[1])
+    except yaml.YAMLError as e:
+        raise HTTPException(400, f"Битый YAML в заголовке: {e}")
+    if not isinstance(meta, dict) or not meta.get("name") or not meta.get("description"):
+        raise HTTPException(400, "В YAML-заголовке обязательны поля name и description")
+    name = re.sub(r"[^a-z0-9_-]", "-", str(meta["name"]).strip().lower())[:40] or "skill"
+    skill_dir = SKILLS_UP / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(raw, encoding="utf-8")
+    return {"ok": True, "name": name, "skills": list_skills()}
+
+
+@app.post("/api/skill/delete")
+def delete_skill(_: bool = Depends(auth), name: str = Form(...)):
+    d = SKILLS_UP / Path(name).name
+    if d.is_dir():
+        shutil.rmtree(d)
+    return {"ok": True, "skills": list_skills()}
 
 
 @app.get("/download/{name}")
@@ -229,6 +282,16 @@ HTML = """<!DOCTYPE html>
   </div>
 
   <div class="card">
+    <div class="step"><span class="num">🧩</span> Скиллы <span class="hint" style="font-weight:400">— необязательно</span></div>
+    <div id="dropsk" class="drop">
+      Перетащи <b>SKILL.md</b> или <b>нажми</b> — добавь свой навык агенту
+      <input type="file" id="upsk" accept=".md,text/markdown" hidden>
+    </div>
+    <div id="skills" class="files"></div>
+    <div class="hint" style="margin-top:8px">Встроенный скилл <b>excel</b> активен всегда. Загруженные добавляются к нему; в заголовке нужны поля <code>name</code> и <code>description</code>.</div>
+  </div>
+
+  <div class="card">
     <div class="step"><span class="num">2</span> Задача</div>
     <textarea id="task" placeholder="Например: на листе 'JV Model' сделай заголовки жирными с серой заливкой, числа в формат #,##0, проценты — 0.0%"></textarea>
     <div class="examples">
@@ -287,6 +350,25 @@ up.onchange=()=>{if(up.files[0])send(up.files[0]);up.value=''};
 ['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drag')}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag')}));
 drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)send(f)});
+// --- skills ---
+function renderSkills(ss){const el=document.getElementById('skills');
+  let h='<div class="file"><span class="ic">🧩</span><span class="nm">excel<span class="sz">встроенный</span></span><span class="sz">всегда активен</span></div>';
+  if(ss&&ss.length){h+=ss.map(s=>`<div class="file"><span class="ic">🧩</span>
+    <span class="nm">${esc(s.name)}<span class="sz">${esc(s.description||'')}</span></span>
+    <button class="dlbtn" style="background:rgba(255,107,107,.14);color:#ff9b9b;border-color:rgba(255,107,107,.4)" onclick="delSkill('${esc(s.name).replace(/'/g,"\\'")}')">✕ Удалить</button></div>`).join('')}
+  el.innerHTML=h}
+async function loadSkills(){try{const d=await j('api/skills');renderSkills(d.skills)}catch(e){}}
+async function sendSkill(file){const fd=new FormData();fd.append('file',file);
+  try{const d=await j('api/skill',{method:'POST',body:fd});renderSkills(d.skills);toast('Скилл добавлен: '+d.name)}
+  catch(e){toast(e.message,true)}}
+async function delSkill(name){const fd=new FormData();fd.append('name',name);
+  try{const d=await j('api/skill/delete',{method:'POST',body:fd});renderSkills(d.skills);toast('Скилл удалён')}catch(e){toast(e.message,true)}}
+const dropsk=document.getElementById('dropsk'),upsk=document.getElementById('upsk');
+dropsk.onclick=()=>upsk.click();
+upsk.onchange=()=>{if(upsk.files[0])sendSkill(upsk.files[0]);upsk.value=''};
+['dragenter','dragover'].forEach(e=>dropsk.addEventListener(e,ev=>{ev.preventDefault();dropsk.classList.add('drag')}));
+['dragleave','drop'].forEach(e=>dropsk.addEventListener(e,ev=>{ev.preventDefault();dropsk.classList.remove('drag')}));
+dropsk.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)sendSkill(f)});
 // profile segmented control
 document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on'));
@@ -310,7 +392,7 @@ async function run(){const task=document.getElementById('task').value.trim();
   }catch(e){document.getElementById('answer').innerHTML='<div class="answer err">⚠ '+esc(e.message)+'</div>';
     document.getElementById('status').textContent='ошибка';toast(e.message,true)}
   go.disabled=false;go.classList.remove('busy');document.getElementById('gotext').textContent='Выполнить'}
-refresh();
+refresh();loadSkills();
 </script></body></html>"""
 
 

@@ -13,6 +13,17 @@ load_dotenv(ROOT / ".env")
 SKILLS_DIR = ROOT / "skills"
 DATA_SOURCE = ROOT / "data" / "source"
 
+def skills_dirs() -> list[str]:
+    """Каталоги скиллов для агента: встроенный + (если есть) пользовательский.
+
+    EXTRA_SKILLS_DIR читается динамически (его может выставить веб-морда после импорта).
+    """
+    dirs = [str(SKILLS_DIR)]
+    extra = os.getenv("EXTRA_SKILLS_DIR", "").strip()
+    if extra and Path(extra).is_dir():
+        dirs.append(extra)
+    return dirs
+
 # Любой OpenAI-совместимый провайдер: задаётся через .env (base_url + ключ + модель).
 # По умолчанию — OpenRouter, для обратной совместимости.
 BASE_URL = (os.getenv("OPENAI_BASE_URL")

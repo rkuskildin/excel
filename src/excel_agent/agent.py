@@ -12,7 +12,7 @@ from pathlib import Path
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 
-from .config import RECURSION_LIMIT, SKILLS_DIR, make_model, n_providers
+from .config import RECURSION_LIMIT, make_model, n_providers, skills_dirs
 from .tools import CUSTOM_TOOLS
 
 SYSTEM_PROMPT = """Ты — агент-ассистент консультанта по данным. Твоя специализация —
@@ -83,7 +83,7 @@ def build_agent(profile: str = "skill_subagent", workdir: str | Path = ".",
         "backend": backend,
     }
     if profile in ("skill", "skill_subagent"):
-        kwargs["skills"] = [str(SKILLS_DIR)]
+        kwargs["skills"] = skills_dirs()  # встроенный skills/ + пользовательский (если есть)
     if profile == "skill_subagent":
         kwargs["subagents"] = [CLEANER_SUBAGENT]
 
