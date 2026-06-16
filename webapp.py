@@ -380,7 +380,7 @@ async function dl(enc,name){try{
     a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(u),1500);toast('Скачивается: '+name);
   }catch(e){toast('Не удалось скачать: '+e.message,true)}}
-async function refresh(){try{const d=await j('api/files');renderFiles(d.files)}catch(e){toast(e.message,true)}}
+async function refresh(){try{const d=await j('api/files');renderFiles(d.files);toast('Список обновлён ('+d.files.length+')')}catch(e){toast(e.message,true)}}
 async function fresh(){try{const d=await j('api/fresh',{method:'POST'});renderFiles(d.files);toast('Демо-данные загружены')}catch(e){toast(e.message,true)}}
 async function send(file){const fd=new FormData();fd.append('file',file);
   try{const d=await j('api/upload',{method:'POST',body:fd});renderFiles(d.files);toast('Загружено: '+file.name)}catch(e){toast(e.message,true)}}
@@ -458,7 +458,8 @@ refresh();loadSkills();
 
 @app.get("/", response_class=HTMLResponse)
 def index(_: bool = Depends(auth)):
-    return HTML
+    # no-store: чтобы браузер не подсовывал устаревший закэшированный JS после деплоя
+    return HTMLResponse(HTML, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 if __name__ == "__main__":
